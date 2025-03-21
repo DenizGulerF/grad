@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title|default('Product Reviews') }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --target-red: #cc0000;
+            --target-dark-red: #990000;
+            --trendyol-orange: #f27a1a;
+            --trendyol-dark-orange: #d56800;
+            --aliexpress-red: #e62e04;
+            --aliexpress-dark-red: #b92503;
+            --text-color: #333333;
+            --light-gray: #f8f8f8;
+            --medium-gray: #e0e0e0;
+            --card-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            --transition-speed: 0.3s;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--light-gray);
+            padding-bottom: 50px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--target-red) 0%, var(--target-dark-red) 100%);
+            color: white;
+            text-align: center;
+            padding: 2rem 1rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header.trendyol {
+            background: linear-gradient(135deg, var(--trendyol-orange) 0%, var(--trendyol-dark-orange) 100%);
+        }
+        
+        .header.aliexpress {
+            background: linear-gradient(135deg, var(--aliexpress-red) 0%, var(--aliexpress-dark-red) 100%);
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .search-form {
+            background-color: white;
+            border-radius: 10px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .search-form h2 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: var(--text-color);
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid var(--medium-gray);
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border var(--transition-speed);
+        }
+        
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--target-red);
+        }
+        
+        .retailer-select {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .retailer-option {
+            flex: 1;
+            text-align: center;
+            background-color: var(--light-gray);
+            padding: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all var(--transition-speed);
+        }
+        
+        .retailer-option:hover {
+            transform: translateY(-3px);
+        }
+        
+        .retailer-option.target {
+            border-color: var(--target-red);
+        }
+        
+        .retailer-option.trendyol {
+            border-color: var(--trendyol-orange);
+        }
+        
+        .retailer-option.aliexpress {
+            border-color: var(--aliexpress-red);
+        }
+        
+        .retailer-logo {
+            max-width: 120px;
+            height: 60px;
+            object-fit: contain;
+            margin-bottom: 0.5rem;
+        }
+        
+        .submit-btn {
+            display: block;
+            width: 100%;
+            padding: 1rem;
+            background-color: var(--target-red);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color var(--transition-speed);
+        }
+        
+        .submit-btn:hover {
+            background-color: var(--target-dark-red);
+        }
+        
+        .submit-btn.trendyol {
+            background-color: var(--trendyol-orange);
+        }
+        
+        .submit-btn.trendyol:hover {
+            background-color: var(--trendyol-dark-orange);
+        }
+        
+        .submit-btn.aliexpress {
+            background-color: var(--aliexpress-red);
+        }
+        
+        .submit-btn.aliexpress:hover {
+            background-color: var(--aliexpress-dark-red);
+        }
+        
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #c62828;
+        }
+        
+        .reviews-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .review-card {
+            background-color: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: var(--card-shadow);
+            transition: transform var(--transition-speed);
+        }
+        
+        .review-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .review-rating {
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+        
+        .review-rating.target {
+            color: var(--target-red);
+        }
+        
+        .review-rating.trendyol {
+            color: var(--trendyol-orange);
+        }
+        
+        .review-rating.aliexpress {
+            color: var(--aliexpress-red);
+        }
+        
+        .stars {
+            color: #FFD700;
+            margin-right: 5px;
+        }
+        
+        .review-title {
+            font-weight: 700;
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+        }
+        
+        .review-content {
+            color: #555;
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+        
+        .review-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #888;
+            border-top: 1px solid var(--medium-gray);
+            padding-top: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .no-reviews {
+            text-align: center;
+            padding: 3rem;
+            grid-column: 1 / -1;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .no-reviews h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: var(--target-red);
+        }
+        
+        .no-reviews.trendyol h3 {
+            color: var(--trendyol-orange);
+        }
+        
+        .no-reviews.aliexpress h3 {
+            color: var(--aliexpress-red);
+        }
+        
+        .no-reviews p {
+            font-size: 1.1rem;
+            color: #666;
+        }
+        
+        .results-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            background-color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .results-header img {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+            margin-right: 1rem;
+        }
+        
+        .results-info h2 {
+            margin-bottom: 0.5rem;
+        }
+        
+        @media (max-width: 768px) {
+            .reviews-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .retailer-select {
+                flex-direction: column;
+            }
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding: 1.5rem;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .footer p {
+            color: #888;
+        }
+        
+        .footer a {
+            color: var(--target-red);
+            text-decoration: none;
+            transition: color var(--transition-speed);
+        }
+        
+        .footer a.trendyol {
+            color: var(--trendyol-orange);
+        }
+        
+        .footer a:hover {
+            color: var(--target-dark-red);
+        }
+        
+        .footer a.trendyol:hover {
+            color: var(--trendyol-dark-orange);
+        }
+    </style>
+</head>
+<body>
+    <div class="header {{ retailer|default('target') }}">
+        <h1>Product Review Finder</h1>
+        <p>Get authentic customer reviews from Target, Trendyol, and AliExpress to help you make informed shopping decisions</p>
+    </div>
+    
+    <div class="container">
+        <div class="search-form">
+            <h2>Find Reviews for Any Product</h2>
+            
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <form action="/get_reviews" method="POST">
+                <div class="form-group">
+                    <label for="product_url">Product URL</label>
+                    <input type="url" id="product_url" name="product_url" placeholder="Paste Target, Trendyol, or AliExpress product URL here" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Select Retailer</label>
+                    <div class="retailer-select">
+                        <label class="retailer-option target" id="target-option">
+                            <input type="radio" name="retailer" value="target" checked style="display: none;">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Target_logo.svg/1541px-Target_logo.svg.png" alt="Target" class="retailer-logo">
+                            <h3>Target</h3>
+                        </label>
+                        
+                        <label class="retailer-option trendyol" id="trendyol-option">
+                            <input type="radio" name="retailer" value="trendyol" style="display: none;">
+                            <img src="https://seekvectors.com/files/download/trendyol-logo.png" alt="Trendyol" class="retailer-logo">
+                            <h3>Trendyol</h3>
+                        </label>
+
+                        <label class="retailer-option aliexpress" id="aliexpress-option">
+                            <input type="radio" name="retailer" value="aliexpress" style="display: none;">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/AliExpress_logo.svg/2560px-AliExpress_logo.svg.png" alt="AliExpress" class="retailer-logo">
+                            <h3>AliExpress</h3>
+                        </label>
+                    </div>
+                </div>
+                
+                <button type="submit" class="submit-btn" id="submit-button">Get Reviews</button>
+            </form>
+        </div>
+        
+        {% if product_name and not show_form_only %}
+        <div class="results-header">
+            <img src="{{ product_image|default('https://via.placeholder.com/150') }}" alt="{{ product_name }}">
+            <div class="results-info">
+                <h2>{{ product_name }}</h2>
+                <div>
+                    {% for i in range(5) %}
+                        {% if i < (product_rating|default(0)|int) %}
+                            <span style="color: #FFD700;">★</span>
+                        {% else %}
+                            <span style="color: #ddd;">★</span>
+                        {% endif %}
+                    {% endfor %}
+                    <span>({{ review_count|default(0) }} reviews)</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="reviews-container">
+            {% if comments and comments|length > 0 %}
+                {% for comment in comments %}
+                    <div class="review-card">
+                        {% if "[" in comment and "/5]" in comment %}
+                            {% set parts = comment.split("]", 1) %}
+                            {% set rating_part = parts[0] + "]" %}
+                            {% set content_part = parts[1] %}
+                            
+                            <div class="review-rating {{ retailer|default('target') }}">
+                                {% set rating_value = rating_part.split("[")[1].split("/")[0]|int %}
+                                <span class="stars">
+                                    {% for i in range(5) %}
+                                        {% if i < rating_value %}★{% else %}☆{% endif %}
+                                    {% endfor %}
+                                </span>
+                                {{ rating_part }}
+                            </div>
+                            
+                            {% if ":" in content_part %}
+                                {% set title_content = content_part.split(":", 1) %}
+                                <div class="review-title">{{ title_content[0]|trim }}</div>
+                                <div class="review-content">{{ title_content[1]|trim }}</div>
+                            {% else %}
+                                <div class="review-content">{{ content_part|trim }}</div>
+                            {% endif %}
+                        {% else %}
+                            <div class="review-content">{{ comment }}</div>
+                        {% endif %}
+                        
+                        <div class="review-info">
+                            <span>{{ retailer|default('Target')|title }} Customer</span>
+                            <span>Verified Purchase</span>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% elif not show_form_only %}
+                <div class="no-reviews {{ retailer|default('target') }}">
+                    <h3>No reviews found</h3>
+                    <p>We couldn't find any reviews for this product at the moment.</p>
+                    <p>Please check back later or try another product.</p>
+                </div>
+            {% endif %}
+        </div>
+        
+        <div class="footer">
+            <p>Review data provided by 
+               <a href="https://www.target.com" target="_blank">Target</a>,
+               <a href="https://www.trendyol.com" target="_blank" class="trendyol">Trendyol</a>, and
+               <a href="https://www.aliexpress.com" target="_blank" class="aliexpress">AliExpress</a>.
+               This page is for demonstration purposes only.
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Add interactivity to retailer selection
+        document.addEventListener('DOMContentLoaded', function() {
+            const targetOption = document.getElementById('target-option');
+            const trendyolOption = document.getElementById('trendyol-option');
+            const aliexpressOption = document.getElementById('aliexpress-option');
+            const submitButton = document.getElementById('submit-button');
+            
+            // Set initial styles
+            targetOption.style.borderColor = 'var(--target-red)';
+            targetOption.style.backgroundColor = '#fff';
+            submitButton.className = 'submit-btn';
+            
+            // Target option click
+            targetOption.addEventListener('click', function() {
+                targetOption.style.borderColor = 'var(--target-red)';
+                targetOption.style.backgroundColor = '#fff';
+                trendyolOption.style.borderColor = 'transparent';
+                trendyolOption.style.backgroundColor = 'var(--light-gray)';
+                aliexpressOption.style.borderColor = 'transparent';
+                aliexpressOption.style.backgroundColor = 'var(--light-gray)';
+                submitButton.className = 'submit-btn';
+                document.querySelector('input[name="retailer"][value="target"]').checked = true;
+            });
+            
+            // Trendyol option click
+            trendyolOption.addEventListener('click', function() {
+                trendyolOption.style.borderColor = 'var(--trendyol-orange)';
+                trendyolOption.style.backgroundColor = '#fff';
+                targetOption.style.borderColor = 'transparent';
+                targetOption.style.backgroundColor = 'var(--light-gray)';
+                aliexpressOption.style.borderColor = 'transparent';
+                aliexpressOption.style.backgroundColor = 'var(--light-gray)';
+                submitButton.className = 'submit-btn trendyol';
+                document.querySelector('input[name="retailer"][value="trendyol"]').checked = true;
+            });
+            
+            // AliExpress option click
+            aliexpressOption.addEventListener('click', function() {
+                aliexpressOption.style.borderColor = 'var(--aliexpress-red)';
+                aliexpressOption.style.backgroundColor = '#fff';
+                targetOption.style.borderColor = 'transparent';
+                targetOption.style.backgroundColor = 'var(--light-gray)';
+                trendyolOption.style.borderColor = 'transparent';
+                trendyolOption.style.backgroundColor = 'var(--light-gray)';
+                submitButton.className = 'submit-btn aliexpress';
+                document.querySelector('input[name="retailer"][value="aliexpress"]').checked = true;
+            });
+            
+            // Automatically detect retailer from URL
+            const urlInput = document.getElementById('product_url');
+            urlInput.addEventListener('input', function() {
+                const url = this.value.toLowerCase();
+                if (url.includes('target.com')) {
+                    targetOption.click();
+                } else if (url.includes('trendyol.com')) {
+                    trendyolOption.click();
+                } else if (url.includes('aliexpress.com') || url.includes('ae.com')) {
+                    aliexpressOption.click();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
