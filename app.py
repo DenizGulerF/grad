@@ -212,6 +212,10 @@ def get_reviews():
                                show_form_only=True,
                                title="Product Review Finder")
     
+
+
+
+    
     try:
         # Get reviews based on retailer
         if retailer == 'target':
