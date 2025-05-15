@@ -17,7 +17,7 @@
     "reviewStructureSuggest": "All from verified purchases",
     "reviewStructureTranslate": "Translate",
     "reviewStructureStar": "Star",
-    "numRatings": "258 ratings",
+    "numRatings": "261 ratings",
     "reviewViewMore": "View more",
     "allRatings": "All ratings"
   },
@@ -302,37 +302,6 @@
       },
       {
         "aigc": false,
-        "anonymous": false,
-        "buyerAddFbDays": 0,
-        "buyerCountry": "US",
-        "buyerEval": 100,
-        "buyerFbType": {
-          "crowdSourcingPersonName": "AliExpress Shopper",
-          "sourceLang": "en",
-          "typeTranslationAccepted": "crowdsourcing"
-        },
-        "buyerFeedback": "good",
-        "buyerName": "a***r",
-        "buyerProductFeedBack": "",
-        "buyerTranslationFeedback": "Good",
-        "downVoteCount": 0,
-        "evalDate": "02 Mar 2025",
-        "evaluationId": 60088908191409785,
-        "evaluationIdStr": "60088908191409785",
-        "independentSite": false,
-        "logistics": "Aliexpress Selection Standard",
-        "reviewLabel1": "Durability",
-        "reviewLabelValue1": "Fast",
-        "reviewType": "REVIEW",
-        "selectedReview": false,
-        "skuInfo": "Color:lake blue Size:arpods pro 2 ",
-        "status": "1",
-        "thirdParty": false,
-        "trendyol": false,
-        "upVoteCount": 0
-      },
-      {
-        "aigc": false,
         "anonymous": true,
         "buyerAddFbDays": 0,
         "buyerCountry": "US",
@@ -358,6 +327,37 @@
         "reviewLabelValue1": "Fast",
         "reviewLabelValue2": "Good",
         "reviewLabelValue3": "Fast",
+        "reviewType": "REVIEW",
+        "selectedReview": false,
+        "skuInfo": "Color:lake blue Size:arpods pro 2 ",
+        "status": "1",
+        "thirdParty": false,
+        "trendyol": false,
+        "upVoteCount": 0
+      },
+      {
+        "aigc": false,
+        "anonymous": false,
+        "buyerAddFbDays": 0,
+        "buyerCountry": "US",
+        "buyerEval": 100,
+        "buyerFbType": {
+          "crowdSourcingPersonName": "AliExpress Shopper",
+          "sourceLang": "en",
+          "typeTranslationAccepted": "crowdsourcing"
+        },
+        "buyerFeedback": "good",
+        "buyerName": "a***r",
+        "buyerProductFeedBack": "",
+        "buyerTranslationFeedback": "Good",
+        "downVoteCount": 0,
+        "evalDate": "02 Mar 2025",
+        "evaluationId": 60088908191409785,
+        "evaluationIdStr": "60088908191409785",
+        "independentSite": false,
+        "logistics": "Aliexpress Selection Standard",
+        "reviewLabel1": "Durability",
+        "reviewLabelValue1": "Fast",
         "reviewType": "REVIEW",
         "selectedReview": false,
         "skuInfo": "Color:lake blue Size:arpods pro 2 ",
@@ -1833,7 +1833,7 @@
       "filterStatistic": [
         {
           "filterCode": "additional",
-          "filterCount": 7
+          "filterCount": 8
         },
         {
           "filterCode": "local",
@@ -1845,11 +1845,11 @@
         },
         {
           "filterCode": "image",
-          "filterCount": 35
+          "filterCount": 37
         },
         {
           "filterCode": "all",
-          "filterCount": 258
+          "filterCount": 261
         }
       ]
     },
@@ -1857,24 +1857,24 @@
     "pageSize": 50,
     "productEvaluationStatistic": {
       "evarageStar": 4.3,
-      "evarageStarRage": 86.5,
-      "fiveStarNum": 172,
-      "fiveStarRate": 70.8,
-      "fourStarNum": 24,
-      "fourStarRate": 9.9,
-      "negativeNum": 26,
-      "negativeRate": 10.7,
-      "neutralNum": 21,
-      "neutralRate": 8.6,
-      "oneStarNum": 23,
-      "oneStarRate": 9.5,
-      "positiveNum": 196,
-      "positiveRate": 80.7,
-      "threeStarNum": 21,
-      "threeStarRate": 8.6,
-      "totalNum": 243,
-      "twoStarNum": 3,
-      "twoStarRate": 1.2
+      "evarageStarRage": 86.2,
+      "fiveStarNum": 185,
+      "fiveStarRate": 70.9,
+      "fourStarNum": 26,
+      "fourStarRate": 10.0,
+      "negativeNum": 31,
+      "negativeRate": 11.9,
+      "neutralNum": 19,
+      "neutralRate": 7.3,
+      "oneStarNum": 26,
+      "oneStarRate": 9.9,
+      "positiveNum": 211,
+      "positiveRate": 80.8,
+      "threeStarNum": 19,
+      "threeStarRate": 7.3,
+      "totalNum": 261,
+      "twoStarNum": 5,
+      "twoStarRate": 1.9
     },
     "productType": "ORDINARY",
     "reviewStructuredLabelDTOList": [
@@ -1909,9 +1909,9 @@
             ]
           }
         ],
-        "count": 176,
+        "count": 177,
         "labelId": 3106287364,
-        "processBar": 2.61567164179104,
+        "processBar": 2.61481481481481,
         "translateContent": "User Friendly  : Good",
         "valueId": 603538814
       },
@@ -1948,7 +1948,7 @@
         ],
         "count": 150,
         "labelId": 2300525965,
-        "processBar": 2.32116788321168,
+        "processBar": 2.32363636363636,
         "translateContent": "Durability : Fits ok ",
         "valueId": 1500325947
       },
@@ -1983,14 +1983,14 @@
             ]
           }
         ],
-        "count": 123,
+        "count": 124,
         "labelId": 3101697276,
-        "processBar": 2.35390946502058,
+        "processBar": 2.3469387755102,
         "translateContent": "Quality of Material : Fits ok ",
         "valueId": 1500325947
       }
     ],
-    "totalNum": 258,
+    "totalNum": 261,
     "totalPage": 6,
     "version": "0.0.0"
   },
