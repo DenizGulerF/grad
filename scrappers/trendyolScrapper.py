@@ -3,6 +3,15 @@ import numpy as np
 import json
 import time
 import random
+import re
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
     """
@@ -22,15 +31,16 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
     # If product_id is not provided, try to extract it from the URL
     if not product_id and product_url:
         # Extract product ID from URL pattern like p-782213857
-        import re
         match = re.search(r'p-(\d+)', product_url)
         if match:
             product_id = match.group(1)
+            logger.info(f"Extracted Trendyol product ID: {product_id}")
         else:
             raise ValueError("Could not extract product ID from URL")
     
     # Base URL for the API
     api_url = f"https://apigw.trendyol.com/discovery-sfint-social-service/api/review/reviews/{product_id}"
+    logger.info(f"Using Trendyol API URL: {api_url}")
     
     # Headers to mimic a browser
     headers = {
@@ -43,7 +53,7 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
     # Parameters for the API - explicitly requesting English reviews
     params = {
         "page": 0,
-        "pageSize": 20,
+        "pageSize": 50,
         "storefrontId": 9,
         "language": "en",      # Filter for English language
         "countryCode": "BE",
@@ -69,6 +79,7 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
            
             
             response = requests.get(api_url, params=params, headers=headers)
+            logger.info(f"Reviews API response status: {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -79,6 +90,7 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
                     product_info["averageRating"] = summary.get("averageRating", 0)
                     product_info["totalRatingCount"] = summary.get("totalRatingCount", 0)
                     product_info["totalCommentCount"] = summary.get("totalCommentCount", 0)
+                    logger.info(f"Product stats - Rating: {product_info['averageRating']}, Total ratings: {product_info['totalRatingCount']}, Total comments: {product_info['totalCommentCount']}")
                     
                     # Try to find an image URL in the product reviews
                     if "productReviews" in data and "content" in data["productReviews"]:
@@ -102,6 +114,13 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
                         break
                     
                     # Process reviews - only include English ones
+                    english_reviews_count = 0
+                    for review in reviews:
+                        if review.get("language", "").lower() == "en":
+                            english_reviews_count += 1
+                    
+                    logger.info(f"Found {english_reviews_count} English reviews on page {page} out of {len(reviews)} total reviews")
+                    
                     for review in reviews:
                         # Skip non-English reviews
                         if review.get("language", "").lower() != "en":
@@ -149,27 +168,122 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
     
     # Try to get a direct product URL from the Trendyol API to fetch details
     try:
-        product_detail_url = f"https://apigw.trendyol.com/discovery-web-productgw-service/api/productDetail/{product_id}?storefrontId=9&culture=en-BE&countryCode=BE"
-        detail_response = requests.get(product_detail_url, headers=headers)
+        # First try the product detail API with different storefronts
+        storefronts = [1, 9, 2]  # Try different storefronts
+        product_found = False
         
-        if detail_response.status_code == 200:
-            detail_data = detail_response.json()
-            if "result" in detail_data:
-                result = detail_data["result"]
-                if "name" in result:
-                    product_info["name"] = result["name"]
-                if "images" in result and result["images"]:
-                    product_info["image"] = "https://cdn.dsmcdn.com/" + result["images"][0]
-        else:
-            print(f"Could not fetch product details: {detail_response.status_code}")
+        for storefront_id in storefronts:
+            if product_found:
+                break
+                
+            product_detail_url = f"https://public-mdc.trendyol.com/discovery-web-productgw-service/api/productDetail/{product_id}?storefrontId={storefront_id}"
+            logger.info(f"Trying product detail API with storefront {storefront_id}")
+            detail_response = requests.get(product_detail_url, headers=headers)
+            logger.info(f"Product detail API response status: {detail_response.status_code}")
+            
+            if detail_response.status_code == 200:
+                detail_data = detail_response.json()
+                if "result" in detail_data:
+                    result = detail_data["result"]
+                    if "name" in result:
+                        product_info["name"] = result["name"]
+                        print(f"Found product name from API: {product_info['name']}")
+                        product_found = True
+                    if "images" in result and result["images"]:
+                        product_info["image"] = "https://cdn.dsmcdn.com/" + result["images"][0]
+                        print(f"Found product image from API: {product_info['image']}")
+                        
+                    # Try to get brand name
+                    if "brand" in result and "name" in result["brand"]:
+                        brand_name = result["brand"]["name"]
+                        # If we have both brand and name, combine them
+                        if brand_name and product_info["name"]:
+                            if brand_name.lower() not in product_info["name"].lower():
+                                product_info["name"] = f"{brand_name} - {product_info['name']}"
+                            print(f"Added brand name: {product_info['name']}")
+        
+        # If still no product name, try the mobile API
+        if product_info["name"] == f"Trendyol Product {product_id}":
+            mobile_api_url = f"https://api.trendyol.com/webbrowsinggw/api/product/{product_id}"
+            mobile_headers = {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "X-Platform": "iPhone"
+            }
+            
+            try:
+                mobile_response = requests.get(mobile_api_url, headers=mobile_headers)
+                if mobile_response.status_code == 200:
+                    mobile_data = mobile_response.json()
+                    if "product" in mobile_data:
+                        product = mobile_data["product"]
+                        if "name" in product:
+                            product_info["name"] = product["name"]
+                            print(f"Found product name from mobile API: {product_info['name']}")
+                        if "brand" in product and "name" in product["brand"]:
+                            brand_name = product["brand"]["name"]
+                            if brand_name and brand_name.lower() not in product_info["name"].lower():
+                                product_info["name"] = f"{brand_name} - {product_info['name']}"
+                                print(f"Added brand name from mobile API: {product_info['name']}")
+            except Exception as e:
+                print(f"Error fetching from mobile API: {str(e)}")
+        
+        # If still no product name, try the search API
+        if product_info["name"] == f"Trendyol Product {product_id}":
+            search_api_url = "https://public-mdc.trendyol.com/discovery-web-searchgw-service/v2/api/infinite-scroll/sr"
+            search_params = {
+                "pi": 1,
+                "q": product_id,
+                "qt": "product",
+                "st": "product",
+                "culture": "en-US",
+                "storefrontId": 1
+            }
+            
+            try:
+                search_response = requests.get(search_api_url, params=search_params, headers=headers)
+                if search_response.status_code == 200:
+                    search_data = search_response.json()
+                    if "products" in search_data and search_data["products"]:
+                        for product in search_data["products"]:
+                            if str(product.get("id")) == str(product_id):
+                                if "name" in product:
+                                    product_info["name"] = product["name"]
+                                    print(f"Found product name from search API: {product_info['name']}")
+                                if "brand" in product and "name" in product["brand"]:
+                                    brand_name = product["brand"]["name"]
+                                    if brand_name and brand_name.lower() not in product_info["name"].lower():
+                                        product_info["name"] = f"{brand_name} - {product_info['name']}"
+                                        print(f"Added brand name from search API: {product_info['name']}")
+                                break
+            except Exception as e:
+                print(f"Error fetching from search API: {str(e)}")
+
     except Exception as e:
         print(f"Error fetching product details: {str(e)}")
     
     print(f"Total English reviews found: {len(all_comments)}")
     
-    # If we found no reviews, add a message
-    if len(all_comments) == 0:
-        all_comments.append("[3/5] No English reviews available for this product. Try a different product.")
+    # If we still have a default product name, try one last time with the review data
+    if product_info["name"] == f"Trendyol Product {product_id}" and all_comments:
+        try:
+            # Look for product name hints in the reviews
+            product_mentions = []
+            for comment in all_comments:
+                # Look for phrases that might mention the product
+                matches = re.finditer(r'(?:this|the)\s+([^.,!?]+(?:shirt|dress|jacket|pants|shoes|watch|bag|product))', comment.lower())
+                for match in matches:
+                    product_mentions.append(match.group(1).strip())
+            
+            if product_mentions:
+                # Use the most common mention as the product name
+                from collections import Counter
+                most_common = Counter(product_mentions).most_common(1)[0][0]
+                product_info["name"] = most_common.title()
+                print(f"Extracted product name from reviews: {product_info['name']}")
+        except Exception as e:
+            print(f"Error extracting product name from reviews: {str(e)}")
     
     # Create a numpy array from the comments
     comments_array = np.array(all_comments)
@@ -185,6 +299,15 @@ def scrape_trendyol_comments(product_id=None, product_url=None, max_pages=3):
                 f.write(f"{i+1}. {comment}\n\n")
     except Exception as e:
         print(f"Error saving reviews: {str(e)}")
+    
+    logger.info("Final product info:")
+    logger.info(json.dumps({
+        "product_name": product_info["name"],
+        "product_image": product_info["image"],
+        "rating": product_info["averageRating"],
+        "review_count": product_info["totalCommentCount"],
+        "total_english_reviews": len(all_comments)
+    }, indent=2))
     
     return {
         "comments": comments_array,

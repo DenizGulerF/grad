@@ -5,6 +5,14 @@ import random
 import numpy as np
 import re
 from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
     """
@@ -36,7 +44,7 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
             match = re.search(pattern, product_url)
             if match:
                 product_id = match.group(1)
-                print(f"Extracted product ID: {product_id}")
+                logger.info(f"Extracted AliExpress product ID: {product_id}")
                 break
                 
         if not product_id:
@@ -44,6 +52,7 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
     
     # Base URL for the API
     feedback_api_url = "https://feedback.aliexpress.com/pc/searchEvaluation.do"
+    logger.info(f"Using AliExpress feedback API URL: {feedback_api_url}")
     
     # Headers to mimic a browser
     headers = {
@@ -71,7 +80,7 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
     try:
         # Create a direct product page URL
         product_page_url = f"https://www.aliexpress.com/item/{product_id}.html"
-        print(f"Fetching product details from: {product_page_url}")
+        logger.info(f"Fetching product details from: {product_page_url}")
         
         # Use a specific User-Agent that's more likely to work with AliExpress
         detail_headers = {
@@ -84,47 +93,125 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
         page_response = requests.get(product_page_url, headers=detail_headers, timeout=10)
         
         if page_response.status_code == 200:
-            # Try to extract product name and image using regex
             html_content = page_response.text
             
-            # Extract product name
-            name_match = re.search(r',"title":"([^"]+)"', html_content)
-            if name_match:
-                product_info["name"] = name_match.group(1).replace('\\', '')
-                print(f"Found product name: {product_info['name']}")
-                
-            # Extract product image
-            image_match = re.search(r'"imagePathList":\["([^"]+)"\]', html_content)
-            if image_match:
-                product_info["image"] = image_match.group(1)
-                if not product_info["image"].startswith("http"):
-                    product_info["image"] = "https:" + product_info["image"]
-                print(f"Found product image: {product_info['image']}")
-                
-            # Extract rating
-            rating_match = re.search(r'"averageStar":"([^"]+)"', html_content)
-            if rating_match:
+            # Try multiple patterns to extract product name
+            name_patterns = [
+                r'"title":"([^"]+)"',  # Standard pattern
+                r'<meta property="og:title" content="([^"]+)"',  # OG meta tag
+                r'<title>([^<]+)</title>',  # Page title
+                r',"subject":"([^"]+)"',  # Alternative API pattern
+                r'"productTitle":"([^"]+)"',  # Another API pattern
+                r'data-title="([^"]+)"'  # HTML attribute pattern
+            ]
+            
+            for pattern in name_patterns:
+                name_match = re.search(pattern, html_content)
+                if name_match:
+                    product_info["name"] = name_match.group(1).replace('\\', '')
+                    logger.info(f"Found product name using pattern {pattern}: {product_info['name']}")
+                    break
+            
+            # Try multiple patterns to extract product image
+            image_patterns = [
+                r'"imagePathList":\["([^"]+)"\]',  # Standard pattern
+                r'<meta property="og:image" content="([^"]+)"',  # OG meta tag
+                r'"imageUrl":"([^"]+)"',  # API pattern
+                r'data-src="([^"]+)"',  # Lazy loading pattern
+                r'src="([^"]+\.jpg)"'  # Basic image pattern
+            ]
+            
+            for pattern in image_patterns:
+                image_match = re.search(pattern, html_content)
+                if image_match:
+                    product_info["image"] = image_match.group(1)
+                    if not product_info["image"].startswith("http"):
+                        product_info["image"] = "https:" + product_info["image"]
+                    logger.info(f"Found product image using pattern {pattern}: {product_info['image']}")
+                    break
+            
+            # Try to extract brand name
+            brand_patterns = [
+                r'"storeName":"([^"]+)"',  # Store name pattern
+                r'"brandName":"([^"]+)"',  # Brand name pattern
+                r'<meta name="brand" content="([^"]+)"'  # Meta brand tag
+            ]
+            
+            for pattern in brand_patterns:
+                brand_match = re.search(pattern, html_content)
+                if brand_match:
+                    brand_name = brand_match.group(1).replace('\\', '')
+                    # If we have both brand and name, combine them
+                    if brand_name and product_info["name"]:
+                        if brand_name.lower() not in product_info["name"].lower():
+                            product_info["name"] = f"{brand_name} - {product_info['name']}"
+                        logger.info(f"Added brand name: {product_info['name']}")
+                    break
+            
+            # Try to extract rating
+            rating_patterns = [
+                r'"averageStar":"([^"]+)"',  # Standard pattern
+                r'"ratings":"([^"]+)"',  # Alternative pattern
+                r'data-rating="([^"]+)"'  # HTML attribute pattern
+            ]
+            
+            for pattern in rating_patterns:
+                rating_match = re.search(pattern, html_content)
+                if rating_match:
+                    try:
+                        product_info["rating"] = float(rating_match.group(1))
+                        logger.info(f"Found product rating: {product_info['rating']}")
+                        break
+                    except:
+                        continue
+            
+            # Try to extract review count
+            review_patterns = [
+                r'"totalValidNum":"(\d+)"',  # Standard pattern
+                r'"reviews":"(\d+)"',  # Alternative pattern
+                r'data-reviews="(\d+)"'  # HTML attribute pattern
+            ]
+            
+            for pattern in review_patterns:
+                review_count_match = re.search(pattern, html_content)
+                if review_count_match:
+                    try:
+                        product_info["reviewCount"] = int(review_count_match.group(1))
+                        product_info["totalRatingCount"] = product_info["reviewCount"]
+                        logger.info(f"Found review count: {product_info['reviewCount']}")
+                        break
+                    except:
+                        continue
+            
+            # If we still don't have a product name, try the API
+            if product_info["name"] == f"AliExpress Product {product_id}":
                 try:
-                    product_info["rating"] = float(rating_match.group(1))
-                    print(f"Found product rating: {product_info['rating']}")
-                except:
-                    pass
+                    api_url = f"https://acs.aliexpress.com/h5/mtop.aliexpress.details.getrecomitems/1.0/?appKey=12574478&t=1677649237000&sign=2dd86c6e2886e6754407e398e52d1274&api=mtop.aliexpress.details.getRecomItems&v=1.0&type=jsonp&dataType=jsonp&callback=mtopjsonp1&data=%7B%22productId%22%3A%22{product_id}%22%7D"
+                    api_response = requests.get(api_url, headers=detail_headers, timeout=10)
                     
-            # Extract review count
-            review_count_match = re.search(r'"totalValidNum":"(\d+)"', html_content)
-            if review_count_match:
-                product_info["reviewCount"] = int(review_count_match.group(1))
-                product_info["totalRatingCount"] = product_info["reviewCount"]
-                print(f"Found review count: {product_info['reviewCount']}")
+                    if api_response.status_code == 200:
+                        api_text = api_response.text
+                        # Extract JSON from JSONP response
+                        json_str = re.search(r'mtopjsonp1\((.*)\)', api_text)
+                        if json_str:
+                            api_data = json.loads(json_str.group(1))
+                            if "data" in api_data and "items" in api_data["data"] and api_data["data"]["items"]:
+                                item = api_data["data"]["items"][0]
+                                if "title" in item:
+                                    product_info["name"] = item["title"]
+                                    logger.info(f"Found product name from API: {product_info['name']}")
+                except Exception as e:
+                    logger.error(f"Error fetching from API: {str(e)}")
+                    
     except Exception as e:
-        print(f"Error fetching product details page: {str(e)}")
+        logger.error(f"Error fetching product details page: {str(e)}")
     
     # Try another API for product details if we couldn't get them from the page
     if not product_info["image"] or product_info["name"] == f"AliExpress Product {product_id}":
         try:
             # Try the ae01 API which often has product details
             detail_api_url = f"https://www.aliexpress.com/item/{product_id}.html?gatewayAdapt=glo2usa&_randl_shipto=US"
-            print(f"Trying alternative API for product details: {detail_api_url}")
+            logger.info(f"Trying alternative API for product details: {detail_api_url}")
             
             detail_response = requests.get(detail_api_url, headers=headers, timeout=10)
             
@@ -139,15 +226,15 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
                     if not image_url.startswith("http"):
                         image_url = "https:" + image_url
                     product_info["image"] = image_url
-                    print(f"Found product image from alternative API: {product_info['image']}")
+                    logger.info(f"Found product image from alternative API: {product_info['image']}")
                 
                 # Try to find product name
                 title_match = re.search(r'<h1[^>]*>([^<]+)</h1>', detail_html)
                 if title_match:
                     product_info["name"] = title_match.group(1).strip()
-                    print(f"Found product name from alternative API: {product_info['name']}")
+                    logger.info(f"Found product name from alternative API: {product_info['name']}")
         except Exception as e:
-            print(f"Error fetching from alternative API: {str(e)}")
+            logger.error(f"Error fetching from alternative API: {str(e)}")
     
     # Process review pages with new corrected structure
     for page in range(1, max_pages + 1):
@@ -167,17 +254,19 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
                 "sort": "complex_default"  # Default sorting
             }
             
-            print(f"Fetching page {page} of reviews for product {product_id} from {country}...")
+            logger.info(f"Fetching page {page} of reviews for product {product_id} from {country}...")
             
             # Add a delay between requests to avoid rate limiting
-            if page > 1:
-                time.sleep(random.uniform(1.5, 3))
+            #if page > 1:
+            #   time.sleep(random.uniform(1.5, 3))
             
             response = requests.get(feedback_api_url, params=params, headers=headers, timeout=10)
+            logger.info(f"Reviews API response status: {response.status_code}")
             
             if response.status_code == 200:
                 try:
                     data = response.json()
+                    logger.info("Successfully parsed JSON response")
                     
                     # Save the raw response for debugging
                     with open(f"aliexpress_raw_response_page{page}.json", "w", encoding="utf-8") as f:
@@ -191,26 +280,26 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
                             
                             if "evarageStar" in stats:
                                 product_info["rating"] = float(stats["evarageStar"])
-                                print(f"Found product rating from API: {product_info['rating']}")
+                                logger.info(f"Found product rating from API: {product_info['rating']}")
                                 
                             if "totalNum" in stats:
                                 product_info["reviewCount"] = int(stats["totalNum"])
                                 product_info["totalRatingCount"] = product_info["reviewCount"]
-                                print(f"Found review count from API: {product_info['reviewCount']}")
+                                logger.info(f"Found total reviews: {product_info['reviewCount']}")
                         
                         # Check for reviews in the correct path: data.evaViewList
                         if "evaViewList" in data["data"] and isinstance(data["data"]["evaViewList"], list):
                             reviews = data["data"]["evaViewList"]
-                            print(f"Found {len(reviews)} reviews on page {page}")
+                            logger.info(f"Found {len(reviews)} reviews on page {page}")
                             
                             # Check pagination info
                             if "currentPage" in data["data"] and "totalPage" in data["data"]:
                                 current_page = data["data"]["currentPage"]
                                 total_pages = data["data"]["totalPage"]
-                                print(f"Page {current_page} of {total_pages}")
+                                logger.info(f"Page {current_page} of {total_pages}")
                                 
                                 if current_page >= total_pages:
-                                    print("Reached the last page of reviews")
+                                    logger.info("Reached the last page of reviews")
                                     if page < max_pages:
                                         max_pages = page  # Stop after this page
                             
@@ -278,41 +367,41 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
                                     all_comments.append(formatted_review)
                                     
                                 except Exception as e:
-                                    print(f"Error processing review: {str(e)}")
+                                    logger.error(f"Error processing review: {str(e)}")
                         else:
-                            print(f"No reviews found in response. Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                            logger.info(f"No reviews found in response. Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
                     else:
-                        print("No 'data' field in response")
+                        logger.info("No 'data' field in response")
                     
                 except Exception as e:
-                    print(f"Error parsing JSON response: {str(e)}")
+                    logger.error(f"Error parsing JSON response: {str(e)}")
                     
             else:
-                print(f"Error accessing AliExpress API: {response.status_code}")
-                print(response.text[:200])  # Show first bit of the response
+                logger.error(f"Error accessing AliExpress API: {response.status_code}")
+                logger.error(response.text[:200])  # Show first bit of the response
                 
         except Exception as e:
-            print(f"Error processing page {page}: {str(e)}")
+            logger.error(f"Error processing page {page}: {str(e)}")
     
     # If we still couldn't find a product image, use a placeholder
     if not product_info["image"]:
         product_info["image"] = f"https://ae01.alicdn.com/kf/placeholder_1.png"
-        print("Using placeholder image")
+        logger.info("Using placeholder image")
     
-    print(f"Total reviews found: {len(all_comments)}")
+    logger.info(f"Total reviews found: {len(all_comments)}")
     
     # If we found no reviews, add a placeholder message
     if len(all_comments) == 0:
         # Try to find reviews directly from the JSON data you pasted
         try:
-            print("Trying to parse reviews from raw data...")
+            logger.info("Trying to parse reviews from raw data...")
             # Save this data to a file for processing
             with open("aliexpress_raw_data.json", "r", encoding="utf-8") as f:
                 raw_data = json.load(f)
                 
             if "data" in raw_data and "evaViewList" in raw_data["data"]:
                 reviews = raw_data["data"]["evaViewList"]
-                print(f"Found {len(reviews)} reviews in raw data")
+                logger.info(f"Found {len(reviews)} reviews in raw data")
                 
                 for review in reviews:
                     try:
@@ -354,9 +443,9 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
                         # Add to comments
                         all_comments.append(formatted_review)
                     except Exception as e:
-                        print(f"Error processing raw review: {str(e)}")
+                        logger.error(f"Error processing raw review: {str(e)}")
         except Exception as e:
-            print(f"Error processing raw data: {str(e)}")
+            logger.error(f"Error processing raw data: {str(e)}")
             
         # If still no reviews, add a default message
         if len(all_comments) == 0:
@@ -368,14 +457,23 @@ def scrape_aliexpress_comments(product_id=None, product_url=None, max_pages=3):
     # Save the reviews to files
     try:
         np.save(f"aliexpress_reviews_{product_id}.npy", comments_array)
-        print(f"Saved {len(comments_array)} reviews to aliexpress_reviews_{product_id}.npy")
+        logger.info(f"Saved {len(comments_array)} reviews to aliexpress_reviews_{product_id}.npy")
         
         # Also save as text
         with open(f"aliexpress_reviews_{product_id}.txt", "w", encoding="utf-8") as f:
             for i, comment in enumerate(all_comments):
                 f.write(f"{i+1}. {comment}\n\n")
     except Exception as e:
-        print(f"Error saving reviews: {str(e)}")
+        logger.error(f"Error saving reviews: {str(e)}")
+    
+    logger.info("Final product info:")
+    logger.info(json.dumps({
+        "product_name": product_info["name"],
+        "product_image": product_info["image"],
+        "rating": product_info["rating"],
+        "review_count": product_info["reviewCount"],
+        "total_reviews_collected": len(all_comments)
+    }, indent=2))
     
     return {
         "comments": comments_array,
@@ -399,7 +497,7 @@ def load_reviews_from_json_data(json_data_file):
         # Check if the data has the expected structure
         if "data" in data and "evaViewList" in data["data"]:
             reviews = data["data"]["evaViewList"]
-            print(f"Found {len(reviews)} reviews in JSON file")
+            logger.info(f"Found {len(reviews)} reviews in JSON file")
             
             for review in reviews:
                 try:
@@ -441,7 +539,7 @@ def load_reviews_from_json_data(json_data_file):
                     # Add to comments
                     all_comments.append(formatted_review)
                 except Exception as e:
-                    print(f"Error processing JSON review: {str(e)}")
+                    logger.error(f"Error processing JSON review: {str(e)}")
             
             # Product info
             product_info = {
@@ -467,7 +565,7 @@ def load_reviews_from_json_data(json_data_file):
                 "review_count": product_info["reviewCount"]
             }
     except Exception as e:
-        print(f"Error loading reviews from JSON: {str(e)}")
+        logger.error(f"Error loading reviews from JSON: {str(e)}")
     
     return {
         "comments": np.array(["[3/5] No reviews available from JSON file."]),
@@ -482,17 +580,17 @@ if __name__ == "__main__":
     product_url = "https://www.aliexpress.com/item/1005005790166027.html"
     result = scrape_aliexpress_comments(product_url=product_url, max_pages=2)
     
-    print("\nProduct:", result["product_name"])
-    print("Image URL:", result["product_image"])
-    print(f"Rating: {result['rating']} ({result['review_count']} reviews)")
+    logger.info("\nProduct:", result["product_name"])
+    logger.info("Image URL:", result["product_image"])
+    logger.info(f"Rating: {result['rating']} ({result['review_count']} reviews)")
     
-    print("\nSample of reviews:")
+    logger.info("\nSample of reviews:")
     for i, review in enumerate(result["comments"][:5]):  # Print first 5 reviews
-        print(f"{i+1}. {review}")
-        print("-" * 80)
+        logger.info(f"{i+1}. {review}")
+        logger.info("-" * 80)
     
     # Alternative: Try loading reviews from JSON data
-    print("\nTrying to load reviews from JSON data...")
+    logger.info("\nTrying to load reviews from JSON data...")
     # First save your JSON data to a file
     with open("aliexpress_sample_data.json", "w", encoding="utf-8") as f:
         f.write("""
@@ -529,10 +627,10 @@ if __name__ == "__main__":
         """)
     
     json_result = load_reviews_from_json_data("aliexpress_sample_data.json")
-    print("\nProduct from JSON:", json_result["product_name"])
-    print(f"Rating from JSON: {json_result['rating']} ({json_result['review_count']} reviews)")
+    logger.info("\nProduct from JSON:", json_result["product_name"])
+    logger.info(f"Rating from JSON: {json_result['rating']} ({json_result['review_count']} reviews)")
     
-    print("\nSample of reviews from JSON:")
+    logger.info("\nSample of reviews from JSON:")
     for i, review in enumerate(json_result["comments"]):
-        print(f"{i+1}. {review}")
-        print("-" * 80)
+        logger.info(f"{i+1}. {review}")
+        logger.info("-" * 80)

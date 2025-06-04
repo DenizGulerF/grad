@@ -1,4 +1,5 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask_cors import CORS
 from scrappers.scrapper import scrape_comments
 from scrappers.trendyolScrapper import scrape_trendyol_comments
 from scrappers.aliexpressScrapper import scrape_aliexpress_comments
@@ -10,21 +11,47 @@ import requests
 import time
 import json
 import uuid
+import os
+from router.scrapper_router import scrapper_bp
+
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key'
+CORS(app)
+app.config.update(
+    SERVER_NAME="localhost:8080"
+)
+
+# Configuration
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-key')
+
+# Connect to Couchbase and store in app config
+try:
+    cluster, bucket, collection = get_connection()
+    app.config['COUCHBASE_CLUSTER'] = cluster
+    app.config['COUCHBASE_COLLECTION'] = collection
+    
+    # Create Products collection if it doesn't exist
+    try:
+        products_collection = bucket.collection("Products")
+    except:
+        bucket.create_collection("Products")
+        products_collection = bucket.collection("Products")
+    
+    app.config['COUCHBASE_PRODUCTS_COLLECTION'] = products_collection
+    print("Couchbase connection established")
+except Exception as e:
+    print(f"Failed to connect to Couchbase: {e}")
+    app.config['COUCHBASE_CLUSTER'] = None
+    app.config['COUCHBASE_COLLECTION'] = None
+    app.config['COUCHBASE_PRODUCTS_COLLECTION'] = None
+
+# Register blueprint with prefix - make sure this is in your app
+app.register_blueprint(scrapper_bp, url_prefix='/api')
 
 # Simple in-memory cache
 cache = {}
 CACHE_EXPIRY = 60  # 60 seconds cache
-
-# Connect to Couchbase - simplified
-try:
-    cluster, bucket, collection = get_connection()
-    print("Couchbase connection established")
-except Exception as e:
-    print(f"Failed to connect to Couchbase: {e}")
-    cluster = bucket = collection = None
 
 def get_target_product_details(product_id):
     """
@@ -212,10 +239,6 @@ def get_reviews():
                                show_form_only=True,
                                title="Product Review Finder")
     
-
-
-
-    
     try:
         # Get reviews based on retailer
         if retailer == 'target':
@@ -297,4 +320,8 @@ def get_reviews():
                           review_count=product_info["review_count"],
                           retailer=retailer,
                           title=f"{retailer.capitalize()} Product Reviews",
-                          show_form_only=False)
+                          show_form_only=False,
+                          product_link=product_url)  # Pass the original URL to the template
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080, debug=True)

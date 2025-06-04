@@ -284,6 +284,7 @@
         .results-header {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             margin-bottom: 1.5rem;
             background-color: white;
             padding: 1rem;
@@ -291,15 +292,9 @@
             box-shadow: var(--card-shadow);
         }
         
-        .results-header img {
-            width: 80px;
-            height: 80px;
-            object-fit: contain;
-            margin-right: 1rem;
-        }
-        
-        .results-info h2 {
-            margin-bottom: 0.5rem;
+        .results-info {
+            display: flex;
+            align-items: center;
         }
         
         @media (max-width: 768px) {
@@ -345,6 +340,109 @@
         
         .footer a.trendyol:hover {
             color: var(--trendyol-dark-orange);
+        }
+        
+        .save-btn {
+            background-color: var(--target-red);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color var(--transition-speed);
+            margin-left: auto;
+        }
+        
+        .save-btn:hover {
+            background-color: var(--target-dark-red);
+        }
+        
+        .save-btn.trendyol {
+            background-color: var(--trendyol-orange);
+        }
+        
+        .save-btn.trendyol:hover {
+            background-color: var(--trendyol-dark-orange);
+        }
+        
+        .save-btn.aliexpress {
+            background-color: var(--aliexpress-red);
+        }
+        
+        .save-btn.aliexpress:hover {
+            background-color: var(--aliexpress-dark-red);
+        }
+
+        .product-image {
+            max-width: 200px;
+            max-height: 200px;
+            object-fit: contain;
+            margin-right: 20px;
+        }
+        
+        .results-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+            background-color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            box-shadow: var(--card-shadow);
+        }
+        
+        .product-info-container {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+        
+        @media (max-width: 768px) {
+            .product-info-container {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .product-image {
+                max-width: 150px;
+                max-height: 150px;
+                margin-right: 0;
+                margin-bottom: 15px;
+            }
+        }
+
+        .product-link {
+            margin-top: 10px;
+        }
+        
+        .product-link a {
+            color: var(--target-red);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color var(--transition-speed);
+        }
+        
+        .product-link a:hover {
+            text-decoration: underline;
+            color: var(--target-dark-red);
+        }
+        
+        .product-link a.trendyol-link {
+            color: var(--trendyol-orange);
+        }
+        
+        .product-link a.trendyol-link:hover {
+            color: var(--trendyol-dark-orange);
+        }
+        
+        .product-link a.aliexpress-link {
+            color: var(--aliexpress-red);
+        }
+        
+        .product-link a.aliexpress-link:hover {
+            color: var(--aliexpress-dark-red);
         }
     </style>
 </head>
@@ -399,20 +497,26 @@
         
         {% if product_name and not show_form_only %}
         <div class="results-header">
-            <img src="{{ product_image|default('https://via.placeholder.com/150') }}" alt="{{ product_name }}">
-            <div class="results-info">
-                <h2>{{ product_name }}</h2>
-                <div>
-                    {% for i in range(5) %}
-                        {% if i < (product_rating|default(0)|int) %}
-                            <span style="color: #FFD700;">★</span>
-                        {% else %}
-                            <span style="color: #ddd;">★</span>
-                        {% endif %}
-                    {% endfor %}
-                    <span>({{ review_count|default(0) }} reviews)</span>
+            <div class="product-info-container">
+                <img src="{{ product_image }}" alt="{{ product_name }}" class="product-image">
+                <div class="results-info">
+                    <h2>{{ product_name }}</h2>
+                    <div>
+                        {% for i in range(5) %}
+                            {% if i < (product_rating|default(0)|int) %}
+                                <span style="color: #FFD700;">★</span>
+                            {% else %}
+                                <span style="color: #ddd;">★</span>
+                            {% endif %}
+                        {% endfor %}
+                        <span>{{ review_count }} reviews</span>
+                    </div>
+                    <div class="product-link">
+                        <a href="{{ product_link }}" target="_blank" class="{{ retailer|default('target') }}-link">View Product on {{ retailer|title|default('Target') }}</a>
+                    </div>
                 </div>
             </div>
+            <button id="save-product-btn" class="save-btn {{ retailer|default('target') }}">Save Product</button>
         </div>
         {% endif %}
         
@@ -532,6 +636,63 @@
                     aliexpressOption.click();
                 }
             });
+            
+            // Handle save product button click
+            const saveButton = document.getElementById('save-product-btn');
+            if (saveButton) {
+                saveButton.addEventListener('click', function() {
+                    // Get product details from the page
+                    const productName = document.querySelector('.results-info h2').textContent;
+                    const productImage = document.querySelector('.results-header img').src;
+                    
+                    // Get review count and rating
+                    const ratingText = document.querySelector('.results-info div span:last-child').textContent;
+                    const reviewCount = parseInt(ratingText.match(/\d+/)[0]) || 0;
+                    
+                    // Count filled stars for rating
+                    const stars = document.querySelectorAll('.results-info div span[style*="FFD700"]').length;
+                    
+                    // Get the product link from the results page (not the form)
+                    const productLink = document.querySelector('.product-link a').href || '';
+                    
+                    // Get retailer from the selected radio button
+                    const retailer = document.querySelector('input[name="retailer"]:checked').value;
+                    
+                    // Prepare data for API
+                    const productData = {
+                        name: productName,
+                        photo: productImage,
+                        review_count: reviewCount,
+                        rating: stars,
+                        product_link: productLink,  // Use the actual product URL from the displayed link
+                        source: retailer  // Add source information
+                    };
+                    
+                    console.log("Saving product:", productData);
+                    
+                    // Send to save_product endpoint
+                    fetch('/api/save_product', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(productData)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.id) {
+                            alert('Product saved successfully!');
+                            console.log("Saved data:", data);
+                        } else {
+                            alert('Error saving product: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error saving product. Please try again.');
+                    });
+                });
+            }
         });
     </script>
 </body>
