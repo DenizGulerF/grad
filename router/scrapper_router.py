@@ -7,9 +7,10 @@ from couchbaseConfig import get_connection
 import jwt
 from functools import wraps
 import re
-from utils.csv_exporter import get_csv_exporter
 from sentiment_service import SentimentService  # Import sentiment analysis
 import logging
+import json
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 scrapper_bp = Blueprint('scrapper', __name__)
 
-# Initialize CSV exporter and sentiment service
-csv_exporter = get_csv_exporter()
+# Initialize sentiment service only (CSV export disabled)
 sentiment_service = SentimentService()
+logger.info("📊 CSV export feature disabled - using ML-only analysis")
 
 # Log sentiment service initialization
 logger.info(f"🔍 Sentiment service initialized in router - ML available: {sentiment_service.ml_available}")
@@ -302,7 +303,7 @@ def scrape_and_save():
                 'rating': result["rating"],
                 'comments': comments,
                 'source': 'target',
-                'product_link': f"https://www.target.com/p/A-{product_id}",
+                'product_link': generate_target_url(product_id, result["product_name"]),
                 'rating_distribution': result.get("rating_distribution"),
                 'recommended_percentage': result.get("recommended_percentage"),
                 'reviews_with_images_count': result.get("reviews_with_images_count"),
@@ -372,32 +373,11 @@ def scrape_and_save():
         else:
             logger.info("⚠️ No comments available for sentiment analysis")
         
-        # Export to CSV if requested
+        # CSV export disabled - ML models don't use CSV files
         csv_files = {}
         if export_csv:
-            try:
-                # Export detailed reviews
-                csv_path = csv_exporter.export_scraped_data(
-                    scraped_data=product_data,
-                    source=source,
-                    product_id=original_product_id or product_id
-                )
-                csv_files['detailed_reviews'] = csv_path
-                
-                # Export product summary
-                summary_path = csv_exporter.export_product_summary(
-                    scraped_data=product_data,
-                    source=source,
-                    product_id=original_product_id or product_id
-                )
-                csv_files['product_summary'] = summary_path
-                
-                logger.info(f"📄 Successfully exported CSV files: {csv_files}")
-                
-            except Exception as csv_error:
-                logger.error(f"❌ Error exporting CSV: {str(csv_error)}")
-                # Don't fail the entire request if CSV export fails
-                csv_files['error'] = str(csv_error)
+            logger.info("📊 CSV export requested but disabled (ML models analyze data directly)")
+            csv_files['disabled'] = "CSV export disabled - ML analysis happens in real-time"
         
         # Generate a unique product ID for database
         db_product_id = str(uuid.uuid4())
@@ -521,7 +501,7 @@ def scrape_only():
                 'rating': result["rating"],
                 'comments': comments,
                 'source': 'target',
-                'product_link': f"https://www.target.com/p/A-{product_id}",
+                'product_link': generate_target_url(product_id, result["product_name"]),
                 'rating_distribution': result.get("rating_distribution"),
                 'recommended_percentage': result.get("recommended_percentage"),
                 'reviews_with_images_count': result.get("reviews_with_images_count")
@@ -583,29 +563,11 @@ def scrape_only():
         else:
             logger.info("⚠️ No comments available for sentiment analysis")
         
-        # Export to CSV if requested
+        # CSV export disabled - ML models don't use CSV files
         csv_files = {}
         if export_csv:
-            try:
-                csv_path = csv_exporter.export_scraped_data(
-                    scraped_data=response_data,
-                    source=source,
-                    product_id=original_product_id or product_id
-                )
-                csv_files['detailed_reviews'] = csv_path
-                
-                summary_path = csv_exporter.export_product_summary(
-                    scraped_data=response_data,
-                    source=source,
-                    product_id=original_product_id or product_id
-                )
-                csv_files['product_summary'] = summary_path
-                
-                logger.info(f"📄 Successfully exported CSV files: {csv_files}")
-                
-            except Exception as csv_error:
-                logger.error(f"❌ Error exporting CSV: {str(csv_error)}")
-                csv_files['error'] = str(csv_error)
+            logger.info("📊 CSV export requested but disabled (ML models analyze data directly)")
+            csv_files['disabled'] = "CSV export disabled - ML analysis happens in real-time"
         
         if csv_files:
             response_data['csv_exports'] = csv_files
@@ -619,188 +581,44 @@ def scrape_only():
 @scrapper_bp.route('/export_to_csv', methods=['POST'])
 @token_required
 def export_to_csv():
-    """Export scraped product data to CSV"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
-    
-    # Check if product_id is provided (to get from database) or product_data is provided directly
-    product_id = data.get('product_id')
-    product_data = data.get('product_data')
-    source = data.get('source', 'unknown')
-    
-    if not product_id and not product_data:
-        return jsonify({'error': 'Either product_id or product_data is required'}), 400
-    
-    try:
-        # If product_id is provided, get data from database
-        if product_id:
-            products_collection = current_app.config.get('COUCHBASE_PRODUCTS_COLLECTION')
-            if not products_collection:
-                return jsonify({'error': 'Database connection not available'}), 500
-            
-            try:
-                product = products_collection.get(f"product::{product_id}").content_as[dict]
-                # Convert database format to export format
-                product_data = {
-                    'product_name': product.get('name', 'Unknown Product'),
-                    'product_image': product.get('photo', ''),
-                    'review_count': product.get('review_count', 0),
-                    'rating': product.get('rating', 0),
-                    'comments': product.get('comments', []),
-                    'source': product.get('source', source),
-                    'product_link': product.get('product_link', ''),
-                    'rating_distribution': product.get('rating_distribution'),
-                    'recommended_percentage': product.get('recommended_percentage'),
-                    'reviews_with_images_count': product.get('reviews_with_images_count')
-                }
-            except:
-                return jsonify({'error': 'Product not found in database'}), 404
-        
-        # Export to CSV
-        csv_files = {}
-        
-        # Export detailed reviews
-        csv_path = csv_exporter.export_scraped_data(
-            scraped_data=product_data,
-            source=product_data.get('source', source),
-            product_id=product_id
-        )
-        csv_files['detailed_reviews'] = csv_path
-        
-        # Export product summary
-        summary_path = csv_exporter.export_product_summary(
-            scraped_data=product_data,
-            source=product_data.get('source', source),
-            product_id=product_id
-        )
-        csv_files['product_summary'] = summary_path
-        
-        return jsonify({
-            'message': 'CSV export completed successfully',
-            'csv_files': csv_files,
-            'product_name': product_data.get('product_name', 'Unknown Product')
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    """CSV export disabled - ML models analyze data directly"""
+    return jsonify({
+        'message': 'CSV export feature has been disabled',
+        'reason': 'ML models analyze review data in real-time without needing CSV files',
+        'suggestion': 'Use sentiment analysis results from the database instead'
+    }), 200
 
 @scrapper_bp.route('/export_saved_products_csv', methods=['POST'])
 @token_required
 def export_saved_products_csv():
-    """Export all saved products for the current user to CSV files"""
-    data = request.get_json() or {}
-    export_type = data.get('export_type', 'both')  # 'detailed', 'summary', or 'both'
-    
-    try:
-        # Get collections from app config
-        collection = current_app.config.get('COUCHBASE_COLLECTION')
-        products_collection = current_app.config.get('COUCHBASE_PRODUCTS_COLLECTION')
-        
-        if not collection or not products_collection:
-            return jsonify({'error': 'Database connection not available'}), 500
-        
-        # Get user document
-        try:
-            user_doc = collection.get(f"user::{request.user['id']}").content_as[dict]
-        except:
-            return jsonify({'error': 'User not found'}), 404
-            
-        # Get saved product IDs
-        saved_products = user_doc.get('saved_products', [])
-        
-        if not saved_products:
-            return jsonify({'error': 'No saved products found'}), 404
-        
-        # Get product details for each saved product ID
-        products_data = []
-        for product_id in saved_products:
-            try:
-                product = products_collection.get(f"product::{product_id}").content_as[dict]
-                
-                # Convert database format to export format
-                product_data = {
-                    'product_name': product.get('name', 'Unknown Product'),
-                    'product_image': product.get('photo', ''),
-                    'review_count': product.get('review_count', 0),
-                    'rating': product.get('rating', 0),
-                    'comments': product.get('comments', []),
-                    'source': product.get('source', 'unknown'),
-                    'product_link': product.get('product_link', ''),
-                    'rating_distribution': product.get('rating_distribution'),
-                    'recommended_percentage': product.get('recommended_percentage'),
-                    'reviews_with_images_count': product.get('reviews_with_images_count'),
-                    'product_id': product_id
-                }
-                
-                products_data.append(product_data)
-            except:
-                # If product no longer exists, skip it
-                continue
-        
-        if not products_data:
-            return jsonify({'error': 'No valid saved products found'}), 404
-        
-        # Export CSV files
-        csv_files = {}
-        
-        if export_type in ['summary', 'both']:
-            # Export summary of all products in one file
-            summary_path = csv_exporter.export_multiple_products(
-                products_data=products_data,
-                filename_prefix=f"user_{request.user['id']}_saved_products"
-            )
-            csv_files['all_products_summary'] = summary_path
-        
-        if export_type in ['detailed', 'both']:
-            # Export detailed reviews for each product
-            csv_files['detailed_products'] = {}
-            for product_data in products_data:
-                try:
-                    csv_path = csv_exporter.export_scraped_data(
-                        scraped_data=product_data,
-                        source=product_data.get('source', 'unknown'),
-                        product_id=product_data.get('product_id')
-                    )
-                    csv_files['detailed_products'][product_data.get('product_id')] = {
-                        'name': product_data.get('product_name', 'Unknown Product'),
-                        'csv_path': csv_path
-                    }
-                except Exception as e:
-                    print(f"Error exporting product {product_data.get('product_id')}: {str(e)}")
-        
-        return jsonify({
-            'message': f'Successfully exported {len(products_data)} saved products',
-            'exported_products_count': len(products_data),
-            'csv_files': csv_files,
-            'export_type': export_type
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    """CSV export disabled - ML models analyze data directly"""
+    return jsonify({
+        'message': 'CSV export feature has been disabled',
+        'reason': 'ML models analyze review data in real-time without needing CSV files',
+        'suggestion': 'Access sentiment analysis results directly from saved products in the database'
+    }), 200
 
 @scrapper_bp.route('/download_csv/<path:filename>', methods=['GET'])
 def download_csv(filename):
-    """Download a CSV file"""
-    try:
-        from flask import send_file
-        import os
+    """CSV download disabled - ML models analyze data directly"""
+    return jsonify({
+        'message': 'CSV download feature has been disabled',
+        'reason': 'ML models analyze review data in real-time without needing CSV files',
+        'suggestion': 'Access sentiment analysis results directly from the database'
+    }), 200
+
+def generate_target_url(product_id, product_name):
+    """Generate proper Target URL with product name slug"""
+    # Create URL slug from product name
+    if product_name and product_name != f"Target Product {product_id}":
+        # Convert product name to URL-friendly slug
+        slug = product_name.lower()
+        # Replace special characters and spaces with hyphens
+        slug = re.sub(r'[^\w\s-]', '', slug)  # Remove special chars except hyphens and spaces
+        slug = re.sub(r'[-\s]+', '-', slug)  # Replace spaces and multiple hyphens with single hyphen
+        slug = slug.strip('-')  # Remove leading/trailing hyphens
         
-        # Construct the full path to the file
-        file_path = os.path.join(csv_exporter.output_dir, filename)
-        
-        # Check if file exists
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'File not found'}), 404
-        
-        # Send the file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='text/csv'
-        )
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return f"https://www.target.com/p/{slug}/-/A-{product_id}"
+    else:
+        # Fallback to simplified URL if no product name available
+        return f"https://www.target.com/p/A-{product_id}"
