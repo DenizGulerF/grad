@@ -4,6 +4,16 @@ import re
 from datetime import datetime
 import uuid
 import logging
+import time
+
+# Import complaint analysis modules
+try:
+    from complaint_modal.inference import count_complaints_by_category, get_top_complaints_zeroshot
+    COMPLAINT_ANALYSIS_AVAILABLE = True
+    print("✅ Complaint analysis modules loaded successfully")
+except Exception as e:
+    print(f"⚠️  Complaint analysis unavailable ({e})")
+    COMPLAINT_ANALYSIS_AVAILABLE = False
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -118,11 +128,19 @@ class SentimentService:
         if not reviews:
             return self._empty_analysis(product_info)
         
+        import time
+        total_start_time = time.time()
+        print(f"📝 Starting complete analysis for {len(reviews)} reviews...")
+        
         try:
             # Clean and prepare reviews
+            clean_start = time.time()
             cleaned_reviews = [clean_text(review) if isinstance(review, str) else "" for review in reviews]
+            clean_time = time.time() - clean_start
+            print(f"🧹 Text cleaning completed in {clean_time:.2f} seconds")
             
             # Get sentiment predictions (use keyword-based for now due to compatibility)
+            rating_start = time.time()
             if USE_ML and self.ml_available:
                 predicted_ratings = predict_rating(reviews)
             else:
@@ -144,23 +162,88 @@ class SentimentService:
                         predicted_ratings.append(3)  # Default neutral
                 predicted_ratings = np.array(predicted_ratings)
             
+            rating_time = time.time() - rating_start
+            print(f"⭐ Rating prediction completed in {rating_time:.2f} seconds")
+            
+            # Note: complaint analysis is done later, only sentiment prediction here
+            
             # Calculate statistics
+            stats_start = time.time()
             analysis_results = self._calculate_statistics(reviews, predicted_ratings, cleaned_reviews, product_info)
+            stats_time = time.time() - stats_start
+            print(f"📊 Statistics calculation completed in {stats_time:.2f} seconds")
+            
+            # Add complaint analysis using inference.py + complaint_categories_zeroshot.py
+            if COMPLAINT_ANALYSIS_AVAILABLE:
+                try:
+                    import time
+                    start_time = time.time()
+                    print(f"🚀 Starting zero-shot complaint analysis for {len(reviews)} reviews...")
+                    
+                    # Use inference.py for complaint analysis with optimized batch processing
+                    batch_size = 32 if len(reviews) > 50 else 16  # Larger batches for more reviews
+                    threshold = 0.3  # Lower threshold for better recall
+                    
+                    # Process once and get counts + extract complaint reviews
+                    complaint_counts, complaint_reviews = count_complaints_by_category(
+                        reviews, threshold=threshold, batch_size=batch_size, extract_reviews=True
+                    )
+                    
+                    # Get top complaints from the counts (no additional processing needed)
+                    top_complaints = self._get_top_complaints_from_counts(complaint_counts, top_n=3)
+                    
+                    # Add complaint reviews to analysis results
+                    analysis_results['complaint_reviews'] = complaint_reviews[:10]  # Limit to top 10
+                    print(f"📝 Extracted {len(complaint_reviews[:10])} complaint reviews")
+                    
+                    # Log complaint reviews details
+                    if complaint_reviews:
+                        print(f"📝 Complaint reviews extracted:")
+                        for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+                            print(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:60]}... (confidence: {review.get('confidence', 'N/A')})")
+                        if len(complaint_reviews) > 5:
+                            print(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
+                    
+                    # Format top_complaints as [category, count] pairs
+                    formatted_top_complaints = [[complaint[0], complaint[1]] for complaint in top_complaints]
+                    
+                    analysis_results['top_complaints'] = formatted_top_complaints
+                    analysis_results['complaint_categories'] = complaint_counts
+                    
+                    elapsed_time = time.time() - start_time
+                    print(f"✅ Zero-shot complaint analysis completed in {elapsed_time:.2f} seconds")
+                    
+                except Exception as e:
+                    print(f"Error in zero-shot complaint analysis: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Fallback to basic complaint detection using keywords
+                    try:
+                        basic_complaints = self._basic_complaint_analysis(reviews)
+                        analysis_results['top_complaints'] = basic_complaints['top_complaints']
+                        analysis_results['complaint_categories'] = basic_complaints['complaint_categories']
+                        analysis_results['complaint_reviews'] = []  # Empty for fallback
+                        print("✅ Using fallback complaint analysis")
+                    except Exception as e2:
+                        print(f"Error in fallback complaint analysis: {e2}")
+                        # Keep empty lists as default
             
             # Convert numpy types to Python native types for JSON serialization
+            conversion_start = time.time()
             analysis_results = self._convert_numpy_types(analysis_results)
+            conversion_time = time.time() - conversion_start
+            print(f"🔄 Data conversion completed in {conversion_time:.2f} seconds")
             
-            # Add metadata
-            analysis_results['ml_based'] = USE_ML and self.ml_available
-            analysis_results['analysis_method'] = 'ML-based' if (USE_ML and self.ml_available) else 'Keyword-based'
+            # Remove product_info from analysis if it was added (it should be at document level)
+            if 'product_info' in analysis_results:
+                del analysis_results['product_info']
             
-            # Add product info if provided
-            if product_info:
-                analysis_results['product_info'] = product_info
+            # Remove timestamp from analysis - it should only be at document level
+            if 'timestamp' in analysis_results:
+                del analysis_results['timestamp']
             
-            # Add timestamp
-            analysis_results['analysis_timestamp'] = datetime.now().isoformat()
-            analysis_results['analysis_id'] = str(uuid.uuid4())
+            total_time = time.time() - total_start_time
+            print(f"🎉 Complete analysis finished in {total_time:.2f} seconds total!")
             
             return analysis_results
             
@@ -227,42 +310,26 @@ class SentimentService:
         positive_themes = self._extract_themes(positive_reviews, positive=True)
         negative_themes = self._extract_themes(complaints, positive=False)
         
+        # Create clean analysis structure
         analysis_result = {
-            'summary': {
-                'average_rating': round(average_rating, 2),
-                'total_reviews': total_reviews,
-                'complaint_count': len(complaints),
-                'complaint_percentage': round((len(complaints) / total_reviews) * 100, 1) if total_reviews > 0 else 0,
-                'recommendation_score': self._calculate_recommendation_score(average_rating, len(complaints), total_reviews)
+            'average_rating': round(average_rating, 2),
+            'total_reviews': total_reviews,
+            'total_complaints': len(complaints),
+            'complaint_percentage': round((len(complaints) / total_reviews) * 100, 1) if total_reviews > 0 else 0,
+            'ml_rating_distribution': {
+                str(i): int(rating_counts.get(i, 0)) for i in range(1, 6)
             },
-            'rating_distribution': rating_distribution,
-            'sentiment_breakdown': sentiment_breakdown,
-            'complaints': {
-                'count': len(complaints),
-                'details': complaints[:10],  # Limit to first 10 for performance
-                'explanations': complaint_analysis.get('explanations', []),
-                'quality_scores': complaint_analysis.get('quality_scores', {}),
-                'common_issues': negative_themes  # Keep backward compatibility
+            'sentiment_breakdown': {
+                'positive': round((len(positive_reviews) / total_reviews) * 100, 1) if total_reviews > 0 else 0,
+                'negative': round((len(complaints) / total_reviews) * 100, 1) if total_reviews > 0 else 0
             },
-            'positive_feedback': {
-                'count': len(positive_reviews),
-                'details': positive_reviews[:5],  # Limit to first 5
-                'common_themes': positive_themes
-            },
-            'detailed_analysis': {
-                'ratings': ratings,
-                'predicted_ratings': ratings,
-                'total_analyzed': total_reviews
-            },
-            'ml_based': USE_ML and self.ml_available,
-            'analysis_method': 'ML-based' if (USE_ML and self.ml_available) else 'Keyword-based',
-            'analysis_timestamp': datetime.now().isoformat(),
-            'analysis_id': str(uuid.uuid4())
+            'top_complaints': [],
+            'complaint_categories': {},
+            'complaint_reviews': [],  # Initialize empty - will be populated by zero-shot analysis
+            'positive_themes': [theme['theme'] for theme in positive_themes[:4]] if positive_themes else [],
+            'analysis_method': 'ML+Complaint Analysis' if COMPLAINT_ANALYSIS_AVAILABLE else ('ML-based' if (USE_ML and self.ml_available) else 'Keyword-based')
         }
         
-        if product_info:
-            analysis_result['product_info'] = product_info
-            
         return self._convert_numpy_types(analysis_result)
     
     def _generate_complaint_explanations(self, complaints):
@@ -464,6 +531,56 @@ class SentimentService:
         except Exception as e:
             print(f"Error retrieving analysis from database: {e}")
             return None
+
+    def _basic_complaint_analysis(self, reviews):
+        """Basic complaint analysis using keyword detection as fallback"""
+        complaint_keywords = {
+            'sound_quality': ['sound', 'audio', 'muffled', 'distorted', 'static', 'noise', 'tinny', 'bass', 'treble'],
+            'battery_life': ['battery', 'charge', 'charging', 'power', 'dies', 'drain', 'short'],
+            'material_quality': ['cheap', 'flimsy', 'broke', 'broken', 'crack', 'plastic', 'build', 'quality'],
+            'comfort_fit': ['comfort', 'uncomfortable', 'tight', 'loose', 'fit', 'ear', 'head', 'pressure'],
+            'connectivity': ['connect', 'bluetooth', 'pair', 'pairing', 'wireless', 'signal', 'drop'],
+            'shipping_delivery': ['shipping', 'delivery', 'package', 'box', 'arrived', 'delayed'],
+            'price_value': ['price', 'expensive', 'cheap', 'value', 'money', 'cost', 'worth'],
+            'customer_service': ['service', 'support', 'help', 'response', 'staff', 'representative']
+        }
+        
+        complaint_counts = {category: 0 for category in complaint_keywords.keys()}
+        
+        # Count complaints by looking for negative sentiment + category keywords
+        for review in reviews:
+            if isinstance(review, str):
+                review_lower = review.lower()
+                # Check if review has negative sentiment indicators
+                negative_indicators = ['bad', 'terrible', 'awful', 'worst', 'hate', 'disappointed', 'poor', 'horrible']
+                has_negative = any(word in review_lower for word in negative_indicators)
+                
+                if has_negative:
+                    for category, keywords in complaint_keywords.items():
+                        if any(keyword in review_lower for keyword in keywords):
+                            complaint_counts[category] += 1
+        
+        # Get top complaints
+        sorted_complaints = sorted(
+            [(cat, count) for cat, count in complaint_counts.items() if count > 0],
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        return {
+            'top_complaints': sorted_complaints[:3],
+            'complaint_categories': complaint_counts
+        }
+
+    def _get_top_complaints_from_counts(self, complaint_counts, top_n=3):
+        """Get top complaints from already computed complaint counts (avoids duplicate processing)"""
+        # Sort complaints by count and get top N
+        sorted_complaints = sorted(
+            [(cat, count) for cat, count in complaint_counts.items() if count > 0],
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return sorted_complaints[:top_n]
 
     def _convert_numpy_types(self, obj):
         """Convert numpy types to Python native types for JSON serialization"""

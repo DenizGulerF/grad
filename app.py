@@ -6,6 +6,8 @@ from scrappers.aliexpressScrapper import scrape_aliexpress_comments
 from couchbaseConfig import get_connection  # Direct import from the root directory
 from couchbase.exceptions import DocumentNotFoundException  # From the SDK package
 from sentiment_service import SentimentService  # Import our new sentiment service
+# Import complaint analysis modules
+# Complaint analysis imports removed - handled through sentiment_service
 import numpy as np
 import re
 import requests
@@ -315,31 +317,18 @@ def get_reviews():
         print(f"Performing sentiment analysis on {len(comments)} reviews...")
         sentiment_analysis = sentiment_service.analyze_reviews(comments, product_info)
         
-        # Save analysis to database if connection is available
-        if app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
-            try:
-                document_key = sentiment_service.save_analysis_to_db(
-                    sentiment_analysis, 
-                    app.config['COUCHBASE_PRODUCTS_COLLECTION'], 
-                    product_id, 
-                    retailer
-                )
-                print(f"Sentiment analysis saved with key: {document_key}")
-            except Exception as e:
-                print(f"Error saving sentiment analysis: {e}")
+        # Analysis is saved as part of the product document below
         
-        # Also save the product information
+        # Save product with clean structure
         if app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
             try:
                 product_document = {
+                    'document_key': f"{retailer}_{product_id}_product",
                     'product_id': product_id,
                     'retailer': retailer,
-                    'url': product_url,
                     'product_info': product_info,
-                    'reviews': comments,
-                    'sentiment_analysis': sentiment_analysis,
-                    'created_timestamp': time.time(),
-                    'last_updated': time.time()
+                    'analysis': sentiment_analysis,
+                    'timestamp': int(time.time())
                 }
                 
                 product_key = f"{retailer}_{product_id}_product"
@@ -373,16 +362,20 @@ def get_sentiment_analysis(retailer, product_id):
         if not app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
             return jsonify({'error': 'Database not available'}), 500
         
-        analysis = sentiment_service.get_analysis_from_db(
-            app.config['COUCHBASE_PRODUCTS_COLLECTION'], 
-            product_id, 
-            retailer
-        )
-        
-        if analysis:
-            return jsonify(analysis)
-        else:
-            return jsonify({'error': 'Analysis not found'}), 404
+        # Get product data with new structure
+        product_key = f"{retailer}_{product_id}_product"
+        try:
+            product_result = app.config['COUCHBASE_PRODUCTS_COLLECTION'].get(product_key)
+            product_data = product_result.value
+            
+            # Return just the analysis part
+            if 'analysis' in product_data:
+                return jsonify(product_data['analysis'])
+            else:
+                return jsonify({'error': 'Analysis not found'}), 404
+                
+        except DocumentNotFoundException:
+            return jsonify({'error': 'Product not found'}), 404
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -417,56 +410,195 @@ def analyze_reviews_endpoint():
         reviews = data['reviews']
         product_info = data.get('product_info', {})
         
-        # Perform sentiment analysis
+        # Perform sentiment analysis with complaint analysis
         analysis = sentiment_service.analyze_reviews(reviews, product_info)
         
         # Optionally save to database if product_id and retailer are provided
         if data.get('product_id') and data.get('retailer') and app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
-            sentiment_service.save_analysis_to_db(
-                analysis, 
-                app.config['COUCHBASE_PRODUCTS_COLLECTION'], 
-                data['product_id'], 
-                data['retailer']
-            )
+            try:
+                # Extract complaint_reviews from analysis if present
+                complaint_reviews = analysis.get('complaint_reviews', [])
+                
+                # Remove complaint_reviews from analysis before saving (it goes at document level)
+                analysis_for_db = analysis.copy()
+                if 'complaint_reviews' in analysis_for_db:
+                    del analysis_for_db['complaint_reviews']
+                
+                product_document = {
+                    'document_key': f"{data['retailer']}_{data['product_id']}_product",
+                    'product_id': data['product_id'],
+                    'retailer': data['retailer'],
+                    'product_info': product_info,
+                    'analysis': analysis_for_db,
+                    'complaint_reviews': complaint_reviews,
+                    'timestamp': int(time.time())
+                }
+                
+                product_key = f"{data['retailer']}_{data['product_id']}_product"
+                app.config['COUCHBASE_PRODUCTS_COLLECTION'].upsert(product_key, product_document)
+                print(f"Product saved with key: {product_key}")
+                print(f"Saved {len(complaint_reviews)} complaint reviews to document level")
+                
+                # Log complaint reviews details
+                if complaint_reviews:
+                    print(f"📝 Complaint reviews being saved to database:")
+                    for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+                        print(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+                    if len(complaint_reviews) > 5:
+                        print(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
+                else:
+                    print(f"   ⚠️ No complaint reviews found in analysis")
+            except Exception as e:
+                print(f"Error saving product: {e}")
         
         return jsonify(analysis)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/products', methods=['GET'])
-def get_all_products():
-    """Get all products with their sentiment analysis"""
+@app.route('/api/complaint-analysis/<retailer>/<product_id>', methods=['GET'])
+def get_complaint_analysis(retailer, product_id):
+    """Get detailed complaint analysis for a specific product"""
     try:
         if not app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
             return jsonify({'error': 'Database not available'}), 500
         
-        # Query all products (this is a simplified version)
-        # In a real application, you'd want to implement pagination
-        from couchbase.cluster import Cluster
-        from couchbase.options import QueryOptions
+        # Get product data with new structure
+        product_key = f"{retailer}_{product_id}_product"
+        try:
+            product_result = app.config['COUCHBASE_PRODUCTS_COLLECTION'].get(product_key)
+            product_data = product_result.value
+            
+            # Return complaint-specific data from analysis
+            if 'analysis' in product_data:
+                analysis = product_data['analysis']
+                complaint_data = {
+                    'product_info': product_data.get('product_info', {}),
+                    'total_reviews': analysis.get('total_reviews', 0),
+                    'total_complaints': analysis.get('total_complaints', 0),
+                    'complaint_percentage': analysis.get('complaint_percentage', 0),
+                    'top_complaints': analysis.get('top_complaints', []),
+                    'complaint_categories': analysis.get('complaint_categories', {}),
+                    'complaint_reviews': product_data.get('complaint_reviews', []),
+                    'ml_rating_distribution': analysis.get('ml_rating_distribution', {}),
+                    'analysis_method': analysis.get('analysis_method', 'Unknown'),
+                    'timestamp': product_data.get('timestamp', 0)
+                }
+                return jsonify(complaint_data)
+            else:
+                return jsonify({'error': 'Analysis not found'}), 404
+                
+        except DocumentNotFoundException:
+            return jsonify({'error': 'Product not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/complaints/categories', methods=['GET'])
+def get_complaint_categories():
+    """Get available complaint categories and their descriptions"""
+    try:
+        # Import only when needed to avoid loading BART model
+        from complaint_modal.complaint_categories_zeroshot import COMPLAINT_LABELS
         
-        cluster = app.config['COUCHBASE_CLUSTER']
-        query = """
-        SELECT p.*, META(p).id as document_id 
-        FROM `Users`.`_default`.`Products` p 
-        WHERE p.retailer IS NOT MISSING 
-        AND p.product_id IS NOT MISSING
-        ORDER BY p.last_updated DESC
-        LIMIT 50
-        """
-        
-        query_result = cluster.query(query, QueryOptions(metrics=True))
-        products = []
-        
-        for row in query_result:
-            products.append(row)
+        categories = []
+        for category, description in COMPLAINT_LABELS.items():
+            categories.append({
+                'category': category,
+                'description': description,
+                'display_name': category.replace('_', ' ').title()
+            })
         
         return jsonify({
-            'products': products,
-            'total': len(products)
+            'categories': categories,
+            'total_categories': len(categories)
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/complaints/analyze-text', methods=['POST'])
+def analyze_text_complaints():
+    """Analyze complaints in provided text using zero-shot classification"""
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'Text data required'}), 400
+        
+        text = data['text']
+        threshold = data.get('threshold', 0.5)
+        
+        # Import only when needed to avoid loading BART model during app startup
+        from complaint_modal.complaint_categories_zeroshot import extract_complaints_zeroshot
+        
+        # Perform complaint analysis on the text
+        complaints = extract_complaints_zeroshot(text, threshold=threshold)
+        
+        result = {
+            'text': text,
+            'threshold': threshold,
+            'complaints_found': complaints,
+            'total_complaints': len(complaints),
+            'analysis_timestamp': time.time()
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products', methods=['GET'])
+def get_all_products():
+    """Get all products from the database"""
+    try:
+        if not app.config.get('COUCHBASE_PRODUCTS_COLLECTION'):
+            return jsonify({'error': 'Database not available'}), 500
+        
+        # Query all products with new structure
+        products = []
+        try:
+            from couchbase.options import QueryOptions
+            
+            cluster = app.config['COUCHBASE_CLUSTER']
+            # Query for documents that have the product structure
+            query = """
+            SELECT p.*, META(p).id as document_id 
+            FROM `Users`.`_default`.`Products` p 
+            WHERE p.document_key LIKE '%_product'
+            AND p.retailer IS NOT MISSING 
+            AND p.product_id IS NOT MISSING
+            ORDER BY p.timestamp DESC
+            LIMIT 50
+            """
+            
+            query_result = cluster.query(query, QueryOptions(metrics=True))
+            
+            for row in query_result:
+                product_data = row
+                # Return product with simplified structure for listing
+                products.append({
+                    'product_id': product_data.get('product_id', ''),
+                    'retailer': product_data.get('retailer', ''),
+                    'product_info': product_data.get('product_info', {}),
+                    'analysis_summary': {
+                        'average_rating': product_data.get('analysis', {}).get('average_rating', 0),
+                        'total_reviews': product_data.get('analysis', {}).get('total_reviews', 0),
+                        'total_complaints': product_data.get('analysis', {}).get('total_complaints', 0),
+                        'complaint_percentage': product_data.get('analysis', {}).get('complaint_percentage', 0),
+                        'analysis_method': product_data.get('analysis', {}).get('analysis_method', 'Unknown')
+                    },
+                    'timestamp': product_data.get('timestamp', 0)
+                })
+                
+            return jsonify({
+                'products': products,
+                'total_count': len(products)
+            })
+            
+        except Exception as e:
+            print(f"Error querying products: {e}")
+            return jsonify({'error': 'Failed to retrieve products'}), 500
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

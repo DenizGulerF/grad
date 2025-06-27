@@ -92,11 +92,19 @@ def save_product():
     # Check if sentiment analysis data is already provided
     if data.get('sentiment_analysis'):
         logger.info("📊 Using pre-computed sentiment analysis data")
-        product_doc['sentiment_analysis'] = data['sentiment_analysis']
+        sentiment_analysis = data['sentiment_analysis']
+        product_doc['sentiment_analysis'] = sentiment_analysis
         
         # Log sentiment summary
-        sentiment_summary = data['sentiment_analysis'].get('summary', {})
-        logger.info(f"📈 Sentiment Summary - Avg Rating: {sentiment_summary.get('average_rating', 'N/A')}, Complaints: {sentiment_summary.get('complaint_count', 'N/A')}, Score: {data['sentiment_analysis'].get('recommendation_score', 'N/A')}")
+        logger.info(f"📈 Sentiment Summary - Avg Rating: {sentiment_analysis.get('average_rating', 'N/A')}, Total Complaints: {sentiment_analysis.get('total_complaints', 'N/A')}, Method: {sentiment_analysis.get('analysis_method', 'N/A')}")
+        
+        # Log complaint reviews if available
+        complaint_reviews = sentiment_analysis.get('complaint_reviews', [])
+        logger.info(f"📝 Found {len(complaint_reviews)} complaint reviews in sentiment analysis:")
+        for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+            logger.info(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+        if len(complaint_reviews) > 5:
+            logger.info(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
         
     # If no pre-computed sentiment analysis but comments are available, analyze them
     elif data.get('comments') and len(data.get('comments', [])) > 0:
@@ -110,6 +118,14 @@ def save_product():
             
             sentiment_analysis = sentiment_service.analyze_reviews(data['comments'], product_info)
             logger.info(f"✅ Sentiment analysis completed - Score: {sentiment_analysis.get('recommendation_score', 'N/A')}")
+            
+            # Log complaint reviews from fresh analysis
+            complaint_reviews = sentiment_analysis.get('complaint_reviews', [])
+            logger.info(f"📝 Generated {len(complaint_reviews)} complaint reviews from analysis:")
+            for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+                logger.info(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+            if len(complaint_reviews) > 5:
+                logger.info(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
             
             # Add sentiment analysis to product document (but not the comments themselves)
             product_doc['sentiment_analysis'] = sentiment_analysis
@@ -130,12 +146,62 @@ def save_product():
         if not collection or not products_collection:
             return jsonify({'error': 'Database connection not available'}), 500
         
+        # Extract complaint_reviews from sentiment_analysis if present and move to document level
+        if 'sentiment_analysis' in product_doc:
+            sentiment_analysis = product_doc['sentiment_analysis']
+            complaint_reviews = sentiment_analysis.get('complaint_reviews', [])
+            
+            # If complaint_reviews is empty but we have comments, try to extract them now
+            if not complaint_reviews and data.get('comments') and len(data.get('comments', [])) > 0:
+                logger.info(f"📝 No complaint reviews in sentiment analysis, attempting to extract from {len(data['comments'])} comments...")
+                try:
+                    # Import the complaint extraction function
+                    from complaint_modal.inference import count_complaints_by_category
+                    
+                    # Extract complaint reviews using BART model
+                    threshold = 0.3  # Lower threshold for better recall
+                    batch_size = 16
+                    complaint_counts, extracted_reviews = count_complaints_by_category(
+                        data['comments'], threshold=threshold, batch_size=batch_size, extract_reviews=True
+                    )
+                    
+                    complaint_reviews = extracted_reviews[:10]  # Limit to top 10
+                    logger.info(f"✅ Successfully extracted {len(complaint_reviews)} complaint reviews using BART model")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to extract complaint reviews: {str(e)}")
+                    complaint_reviews = []
+            
+            # Remove complaint_reviews from sentiment_analysis (they go at document level)
+            if 'complaint_reviews' in sentiment_analysis:
+                del sentiment_analysis['complaint_reviews']
+            
+            # Add complaint_reviews at document level
+            product_doc['complaint_reviews'] = complaint_reviews
+            
+            logger.info(f"📝 Moved {len(complaint_reviews)} complaint reviews to document level")
+            
+            # Log complaint reviews details
+            if complaint_reviews:
+                logger.info(f"📝 Complaint reviews details:")
+                for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+                    logger.info(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+                if len(complaint_reviews) > 5:
+                    logger.info(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
+            else:
+                logger.info(f"   ⚠️ No complaint reviews found or extracted")
+        else:
+            # If no sentiment analysis, ensure complaint_reviews exists as empty array
+            product_doc['complaint_reviews'] = []
+            logger.info(f"📝 No sentiment analysis provided, complaint_reviews set to empty array")
+
         # Save product to Products collection
         products_collection.upsert(f"product::{product_id}", product_doc)
         
         # Log what was saved
         has_sentiment = 'sentiment_analysis' in product_doc
-        logger.info(f"💾 Product saved to database with ID: {product_id} (includes_sentiment: {has_sentiment})")
+        complaint_count = len(product_doc.get('complaint_reviews', []))
+        logger.info(f"💾 Product saved to database with ID: {product_id} (includes_sentiment: {has_sentiment}, complaint_reviews: {complaint_count})")
         
         # Get current user's document
         try:
@@ -388,8 +454,35 @@ def scrape_and_save():
         # Get the Products collection specifically
         products_collection = bucket.collection("Products")
         
-        # Update product_data with proper field names for database
+        # Extract sentiment analysis and prepare for new clean structure
+        sentiment_analysis = product_data.get('sentiment_analysis', {})
+        complaint_reviews = sentiment_analysis.get('complaint_reviews', [])
+        
+        # Remove complaint_reviews from analysis before saving (it goes at document level)
+        analysis_for_db = sentiment_analysis.copy() if sentiment_analysis else {}
+        if 'complaint_reviews' in analysis_for_db:
+            del analysis_for_db['complaint_reviews']
+        
+        # Create product document in new clean structure
         db_product_data = {
+            'document_key': f"scraped_{db_product_id}_product",
+            'product_id': db_product_id,
+            'retailer': product_data['source'],
+            'product_info': {
+                'name': product_data['product_name'],
+                'rating': product_data['rating'],
+                'review_count': product_data['review_count'],
+                'original_rating_distribution': product_data.get('rating_distribution', {}),
+                'recommended_percentage': product_data.get('recommended_percentage'),
+                'reviews_with_images_count': product_data.get('reviews_with_images_count'),
+                'product_link': product_data['product_link'],
+                'product_image': product_data['product_image']
+            },
+            'analysis': analysis_for_db,
+            'complaint_reviews': complaint_reviews,
+            'timestamp': int(time.time()),
+            
+            # Keep legacy fields for backward compatibility (can be removed later)
             'name': product_data['product_name'],
             'photo': product_data['product_image'],
             'review_count': product_data['review_count'],
@@ -400,13 +493,25 @@ def scrape_and_save():
             'rating_distribution': product_data.get('rating_distribution'),
             'recommended_percentage': product_data.get('recommended_percentage'),
             'reviews_with_images_count': product_data.get('reviews_with_images_count'),
-            'sentiment_analysis': product_data.get('sentiment_analysis'),  # Add sentiment analysis
+            'sentiment_analysis': analysis_for_db,  # Legacy field
             'type': 'product'
         }
         
-        # Save to Couchbase Products collection
-        products_collection.upsert(f"product::{db_product_id}", db_product_data)
+        # Save to Couchbase Products collection with new key format
+        product_key = f"scraped_{db_product_id}_product"
+        products_collection.upsert(product_key, db_product_data)
         logger.info(f"💾 Product saved to database with sentiment analysis: {db_product_id}")
+        logger.info(f"📝 Saved {len(complaint_reviews)} complaint reviews to document level")
+        
+        # Log complaint reviews details
+        if complaint_reviews:
+            logger.info(f"📝 Complaint reviews saved to database:")
+            for i, review in enumerate(complaint_reviews[:5]):  # Show first 5
+                logger.info(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+            if len(complaint_reviews) > 5:
+                logger.info(f"   ... and {len(complaint_reviews) - 5} more complaint reviews")
+        else:
+            logger.info(f"   ⚠️ No complaint reviews found in sentiment analysis")
         
         # Prepare response
         response_data = {
@@ -552,16 +657,36 @@ def scrape_only():
                 }
                 
                 sentiment_analysis = sentiment_service.analyze_reviews(response_data['comments'], product_info)
-                response_data['sentiment_analysis'] = sentiment_analysis
                 
-                logger.info(f"✅ Sentiment analysis completed - Score: {sentiment_analysis.get('recommendation_score', 'N/A')}")
-                logger.info(f"📊 Analysis summary: Avg rating: {sentiment_analysis.get('summary', {}).get('average_rating', 'N/A')}, Complaints: {sentiment_analysis.get('summary', {}).get('complaint_count', 'N/A')}")
+                # Extract complaint_reviews to top level for frontend access
+                complaint_reviews = sentiment_analysis.get('complaint_reviews', [])
+                
+                # Remove complaint_reviews from sentiment_analysis for clean response
+                if 'complaint_reviews' in sentiment_analysis:
+                    del sentiment_analysis['complaint_reviews']
+                
+                response_data['sentiment_analysis'] = sentiment_analysis
+                response_data['complaint_reviews'] = complaint_reviews
+                
+                logger.info(f"✅ Sentiment analysis completed - Method: {sentiment_analysis.get('analysis_method', 'N/A')}")
+                logger.info(f"📊 Analysis summary: Avg rating: {sentiment_analysis.get('average_rating', 'N/A')}, Total complaints: {sentiment_analysis.get('total_complaints', 'N/A')}")
+                logger.info(f"📝 Extracted {len(complaint_reviews)} complaint reviews for frontend access")
+                
+                # Log complaint reviews details
+                if complaint_reviews:
+                    logger.info(f"📝 Complaint reviews available in scrape_only response:")
+                    for i, review in enumerate(complaint_reviews[:3]):  # Show first 3
+                        logger.info(f"   {i+1}. [{review.get('complaint_type', 'unknown')}] {review.get('text', 'No text')[:80]}... (confidence: {review.get('confidence', 'N/A')})")
+                    if len(complaint_reviews) > 3:
+                        logger.info(f"   ... and {len(complaint_reviews) - 3} more complaint reviews")
                 
             except Exception as e:
                 logger.error(f"❌ Sentiment analysis failed: {str(e)}")
                 response_data['sentiment_analysis'] = {"error": "Analysis failed", "details": str(e)}
+                response_data['complaint_reviews'] = []  # Ensure complaint_reviews exists even on error
         else:
             logger.info("⚠️ No comments available for sentiment analysis")
+            response_data['complaint_reviews'] = []  # Ensure complaint_reviews exists when no comments
         
         # CSV export disabled - ML models don't use CSV files
         csv_files = {}
@@ -577,27 +702,8 @@ def scrape_only():
     except Exception as e:
         logger.error(f"❌ Error in scrape_only: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-@scrapper_bp.route('/export_to_csv', methods=['POST'])
-@token_required
-def export_to_csv():
-    """CSV export disabled - ML models analyze data directly"""
-    return jsonify({
-        'message': 'CSV export feature has been disabled',
-        'reason': 'ML models analyze review data in real-time without needing CSV files',
-        'suggestion': 'Use sentiment analysis results from the database instead'
-    }), 200
-
-@scrapper_bp.route('/export_saved_products_csv', methods=['POST'])
-@token_required
-def export_saved_products_csv():
-    """CSV export disabled - ML models analyze data directly"""
-    return jsonify({
-        'message': 'CSV export feature has been disabled',
-        'reason': 'ML models analyze review data in real-time without needing CSV files',
-        'suggestion': 'Access sentiment analysis results directly from saved products in the database'
-    }), 200
-
+    
+    
 @scrapper_bp.route('/download_csv/<path:filename>', methods=['GET'])
 def download_csv(filename):
     """CSV download disabled - ML models analyze data directly"""
